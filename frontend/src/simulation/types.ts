@@ -20,9 +20,7 @@ export interface Zone {
   cells: GridCell[];
   dumpCount: number;
 }
-
-export type TruckState = 'idle' | 'moving_to_dump' | 'dumping' | 'returning' | 'waiting';
-
+export type TruckState = 'idle' | 'requesting_dump' | 'moving_to_dump' | 'dumping' | 'requesting_return' | 'returning' | 'waiting';
 export interface Truck {
   id: number;
   label: string;
@@ -35,10 +33,12 @@ export interface Truck {
   assignedZone: number;
   dumpCount: number;
   targetCell: { row: number; col: number } | null;
-  path: Point[];
+  path: Point[] | null;
+  pathIndex: number;
   waitTimer: number;
   dumpTimer: number;
   color: string;
+  zoneName: string;
 }
 
 export interface SimMetrics {

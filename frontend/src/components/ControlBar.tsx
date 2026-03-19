@@ -1,9 +1,12 @@
 import React from 'react';
 import { useSimulationStore } from '@/simulation/store';
-import { Play, Pause, RotateCcw, Eye } from 'lucide-react';
+import { Play, Pause, RotateCcw, Eye, Edit3, CheckCircle, MapPin } from 'lucide-react';
 
 const ControlBar: React.FC = () => {
-  const { running, speed, viewMode, showHeatmap, start, pause, reset, setSpeed, setViewMode, toggleHeatmap } = useSimulationStore();
+  const { 
+    running, speed, viewMode, showHeatmap, start, pause, reset, setSpeed, setViewMode, toggleHeatmap,
+    isDrawing, settingEntryPoint, startDrawingMode, finishPolygon, polygonVertices, setEntryPointMode, yardPolygon
+  } = useSimulationStore();
 
   return (
     <div className="control-bar justify-between">
@@ -33,6 +36,38 @@ const ControlBar: React.FC = () => {
         >
           <RotateCcw size={12} /> Reset
         </button>
+
+        <button
+          onClick={startDrawingMode}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+            isDrawing || settingEntryPoint ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          <Edit3 size={12} /> Draw Yard
+        </button>
+
+        {isDrawing && (
+          <button
+            onClick={finishPolygon}
+            disabled={polygonVertices.length < 3}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              polygonVertices.length >= 3 ? 'bg-accent text-accent-foreground border-accent hover:opacity-90' : 'bg-muted text-muted-foreground border-border opacity-50 cursor-not-allowed'
+            }`}
+          >
+            <CheckCircle size={12} /> Finish Polygon
+          </button>
+        )}
+        
+        {yardPolygon.length >= 3 && !isDrawing && (
+          <button
+            onClick={setEntryPointMode}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              settingEntryPoint ? 'bg-accent text-accent-foreground border-accent' : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            <MapPin size={12} /> Move Entry Point
+          </button>
+        )}
 
         <div className="h-4 w-px bg-border" />
 

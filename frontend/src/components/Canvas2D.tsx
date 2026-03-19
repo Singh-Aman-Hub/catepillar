@@ -1,11 +1,34 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useSimulationStore } from '@/simulation/store';
-import { ZONE_COLORS, ZONE_BORDER_COLORS, YARD_POLYGON, DEFAULT_CONFIG } from '@/simulation/config';
+import { ZONE_COLORS, ZONE_BORDER_COLORS, YARD_POLYGON, DEFAULT_CONFIG, ENTRY_POINT } from '@/simulation/config';
 import { drawParticles } from '@/simulation/particles';
 
 const Canvas2D: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { grid, zones, trucks, showHeatmap, tick, particles } = useSimulationStore();
+  const { 
+    grid, zones, trucks, showHeatmap, tick, particles,
+    isDrawing, polygonVertices, settingEntryPoint, entryPoint, yardPolygon,
+    addPolygonVertex, setEntryPoint
+  } = useSimulationStore();
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing && !settingEntryPoint) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = Math.round((e.clientX - rect.left) * scaleX);
+    const y = Math.round((e.clientY - rect.top) * scaleY);
+    
+    if (isDrawing) {
+      addPolygonVertex({ x, y });
+    } else if (settingEntryPoint) {
+      setEntryPoint({ x, y });
+      // Implicitly initialize the yard when the entry point is set
+      useSimulationStore.getState().submitCustomYard();
+    }
+  }, [isDrawing, settingEntryPoint, addPolygonVertex, setEntryPoint]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -23,9 +46,14 @@ const Canvas2D: React.FC = () => {
 
     // Yard polygon
     ctx.beginPath();
-    ctx.moveTo(YARD_POLYGON[0].x, YARD_POLYGON[0].y);
-    for (let i = 1; i < YARD_POLYGON.length; i++) {
-      ctx.lineTo(YARD_POLYGON[i].x, YARD_POLYGON[i].y);
+    const poly = yardPolygon.length > 0 ? yardPolygon : (isDrawing && polygonVertices.length > 0 ? polygonVertices : YARD_POLYGON);
+    
+    if (poly.length > 0) {
+      ctx.moveTo(poly[0].x, poly[0].y);
+      for (let i = 1; i < poly.length; i++) {
+        ctx.lineTo(poly[i].x, poly[i].y);
+      }
+      if (yardPolygon.length > 0 || !isDrawing) ctx.closePath();
     }
     ctx.closePath();
     ctx.fillStyle = '#FFFFFF';
@@ -34,38 +62,75 @@ const Canvas2D: React.FC = () => {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    if (grid.length === 0) return;
+    
+    // Draw polygon vertices if drawing
+    if (isDrawing) {
+      for (const p of polygonVertices) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#EF4444';
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    if (grid.length === 0 && !isDrawing && !settingEntryPoint) return;
 
     const cellW = (DEFAULT_CONFIG.yardWidth - DEFAULT_CONFIG.yardPadding * 2) / DEFAULT_CONFIG.gridCols;
     const cellH = (DEFAULT_CONFIG.yardHeight - DEFAULT_CONFIG.yardPadding * 2) / DEFAULT_CONFIG.gridRows;
 
     // Draw zone backgrounds
     for (let zoneId = 0; zoneId < zones.length; zoneId++) {
-      const zoneCells = grid.flat().filter(c => c.zoneId === zoneId);
-      if (zoneCells.length === 0) continue;
+      const zone = zones[zoneId];
+      const pts = (zone as any).polygonPoints;
 
-      const minR = Math.min(...zoneCells.map(c => c.row));
-      const maxR = Math.max(...zoneCells.map(c => c.row));
-      const minC = Math.min(...zoneCells.map(c => c.col));
-      const maxC = Math.max(...zoneCells.map(c => c.col));
+      if (pts && pts.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for(let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        
+        ctx.fillStyle = zone.color || ZONE_COLORS[zoneId % ZONE_COLORS.length];
+        ctx.fill();
+        ctx.strokeStyle = ZONE_BORDER_COLORS[zoneId % ZONE_BORDER_COLORS.length];
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Zone label
+        if (zone.center) {
+           ctx.fillStyle = '#6B7280';
+           ctx.font = '600 10px Inter';
+           ctx.fillText((zone as any).name || `Zone ${zoneId + 1}`, zone.center.x - 15, zone.center.y);
+        }
+      } else {
+        const zoneCells = grid.flat().filter(c => c.zoneId === zoneId);
+        if (zoneCells.length === 0) continue;
 
-      const x = DEFAULT_CONFIG.yardPadding + minC * cellW;
-      const y = DEFAULT_CONFIG.yardPadding + minR * cellH;
-      const w = (maxC - minC + 1) * cellW;
-      const h = (maxR - minR + 1) * cellH;
+        const minR = Math.min(...zoneCells.map(c => c.row));
+        const maxR = Math.max(...zoneCells.map(c => c.row));
+        const minC = Math.min(...zoneCells.map(c => c.col));
+        const maxC = Math.max(...zoneCells.map(c => c.col));
 
-      ctx.fillStyle = ZONE_COLORS[zoneId % ZONE_COLORS.length];
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = ZONE_BORDER_COLORS[zoneId % ZONE_BORDER_COLORS.length];
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(x, y, w, h);
-      ctx.setLineDash([]);
+        const x = DEFAULT_CONFIG.yardPadding + minC * cellW;
+        const y = DEFAULT_CONFIG.yardPadding + minR * cellH;
+        const w = (maxC - minC + 1) * cellW;
+        const h = (maxR - minR + 1) * cellH;
 
-      // Zone label
-      ctx.fillStyle = '#6B7280';
-      ctx.font = '600 10px Inter';
-      ctx.fillText(`Zone ${zoneId + 1}`, x + 4, y + 12);
+        ctx.fillStyle = ZONE_COLORS[zoneId % ZONE_COLORS.length];
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = ZONE_BORDER_COLORS[zoneId % ZONE_BORDER_COLORS.length];
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.setLineDash([]);
+
+        // Zone label
+        ctx.fillStyle = '#6B7280';
+        ctx.font = '600 10px Inter';
+        ctx.fillText(`Zone ${zoneId + 1}`, x + 4, y + 12);
+      }
     }
 
     // Draw grid cells
@@ -91,7 +156,7 @@ const Canvas2D: React.FC = () => {
 
     // Draw truck paths
     for (const truck of trucks) {
-      if (truck.path.length >= 2 && (truck.state === 'moving_to_dump' || truck.state === 'returning')) {
+      if (truck.path && truck.path.length >= 2 && (truck.state === 'moving_to_dump' || truck.state === 'returning')) {
         ctx.beginPath();
         ctx.moveTo(truck.path[0].x, truck.path[0].y);
         for (let i = 1; i < truck.path.length; i++) {
@@ -249,8 +314,9 @@ const Canvas2D: React.FC = () => {
     drawParticles(ctx, particles);
 
     // Entry point indicator
+    const currentEntryPoint = entryPoint || ENTRY_POINT;
     ctx.beginPath();
-    ctx.arc(20, 240, 8, 0, Math.PI * 2);
+    ctx.arc(currentEntryPoint.x, currentEntryPoint.y, 8, 0, Math.PI * 2);
     ctx.fillStyle = 'hsla(48, 96%, 53%, 0.3)';
     ctx.fill();
     ctx.strokeStyle = '#FACC15';
@@ -259,10 +325,27 @@ const Canvas2D: React.FC = () => {
     ctx.fillStyle = '#1F2937';
     ctx.font = '600 7px JetBrains Mono';
     ctx.textAlign = 'center';
-    ctx.fillText('ENTRY', 20, 256);
+    ctx.fillText('ENTRY', currentEntryPoint.x, currentEntryPoint.y + 16);
     ctx.textAlign = 'left';
+    
+    // Drawing UI Text Overlays
+    if (isDrawing) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(W / 2 - 150, 10, 300, 30);
+      ctx.fillStyle = '#FFF';
+      ctx.font = '12px Inter';
+      ctx.textAlign = 'center';
+      ctx.fillText('Click to add vertices to the custom yard polygon.', W / 2, 30);
+    } else if (settingEntryPoint) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(W / 2 - 150, 10, 300, 30);
+      ctx.fillStyle = '#FFF';
+      ctx.font = '12px Inter';
+      ctx.textAlign = 'center';
+      ctx.fillText('Click inside the yard to set the Entry Point.', W / 2, 30);
+    }
 
-  }, [grid, zones, trucks, showHeatmap, tick, particles]);
+  }, [grid, zones, trucks, showHeatmap, tick, particles, isDrawing, polygonVertices, settingEntryPoint, entryPoint, yardPolygon]);
 
   useEffect(() => {
     draw();
@@ -273,8 +356,9 @@ const Canvas2D: React.FC = () => {
       ref={canvasRef}
       width={DEFAULT_CONFIG.yardWidth}
       height={DEFAULT_CONFIG.yardHeight}
-      className="w-full h-full"
-      style={{ imageRendering: 'crisp-edges' }}
+      className={`w-full h-full ${isDrawing || settingEntryPoint ? 'cursor-crosshair' : ''}`}
+      style={{ imageRendering: 'crisp-edges', touchAction: 'none' }}
+      onPointerDown={handlePointerDown}
     />
   );
 };
